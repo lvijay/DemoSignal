@@ -33,5 +33,25 @@ public class Demo {
         String bobMsgFromAlice = bobSession.decrypt(alice.getAddress(), aliceMsgToBob);
 
         System.out.println("alice sent bob '" + bobMsgFromAlice + "'");
+
+        for (String message : "one,two,three,four,five,six,seven".split(",")) {
+            PreKeySignalMessage encrypt = aliceSession.encrypt(bob.getAddress(), message);
+            String decrypt = bobSession.decrypt(alice.getAddress(), encrypt);
+
+            if (!decrypt.equals(message)) {
+                throw new IllegalStateException("unexpected message");
+            }
+            System.out.println("sent and received: '" + message + "'");
+        }
+
+        bobSession = new Session(bob.getStore());
+        bobSession.introduceTo(alice.getAddress(), alice.getPreKey());
+        PreKeySignalMessage encrypt = bobSession.encrypt(alice.getAddress(), "world");
+
+        String decrypt = aliceSession.decrypt(bob.getAddress(), encrypt);
+
+        aliceSession = new Session(alice.getStore());
+        aliceSession.introduceTo(bob.getAddress(), bob.getPreKey());
+        aliceSession.encrypt(bob.getAddress(), "world");
     }
 }
