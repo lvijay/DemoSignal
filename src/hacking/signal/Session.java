@@ -1,5 +1,6 @@
 package hacking.signal;
 
+import java.nio.charset.Charset;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -18,71 +19,92 @@ import org.whispersystems.libsignal.SignalProtocolAddress;
 import org.whispersystems.libsignal.UntrustedIdentityException;
 import org.whispersystems.libsignal.protocol.CiphertextMessage;
 import org.whispersystems.libsignal.protocol.PreKeySignalMessage;
-import org.whispersystems.libsignal.state.PreKeyBundle;
 import org.whispersystems.libsignal.state.SignalProtocolStore;
 
 public class Session {
+    private enum Operation { ENCRYPT, DECRYPT; }
+    private static final Charset UTF8 = Charset.forName("UTF-8");
+
     private final SignalProtocolStore store;
     private final Map<String, SessionCipher> sessions;
+    private final Map<String, Entity> entities;
+    private volatile Operation lastOp;
 
     public Session(SignalProtocolStore store) {
         this.store = store;
         this.sessions = new HashMap<>();
+        this.entities = new HashMap<>();
     }
 
-    public void introduceTo(String toAddress, PreKeyBundle preKey) {
-        sessions.computeIfAbsent(toAddress, ignored -> {
-            try {
-                SignalProtocolAddress to = new SignalProtocolAddress(toAddress, 1);
-                SessionBuilder builder = new SessionBuilder(store, to);
-
-                builder.process(preKey);
-
-                return new SessionCipher(store, to);
-            } catch (InvalidKeyException | UntrustedIdentityException e) {
-                throw new RuntimeException(e);
-            }
-        });
+    public void introduceTo(Entity entity) {
+        entities.put(entity.getAddress(), entity);
     }
 
-    public PreKeySignalMessage encrypt(String toAddress, String message)
-            throws InvalidMessageException, InvalidVersionException
-    {
-        SessionCipher cipher = sessions.getOrDefault(toAddress, null);
+    /*default*/ SessionCipher getCipher(Operation operation, String to) {
+        Entity toEntity = entities.get(to);
 
-        if (cipher == null) {
-            throw new IllegalStateException("initiate session first");
+        if (toEntity == null) {
+            throw new IllegalStateException();
         }
 
-        CiphertextMessage ciphertext = cipher.encrypt(message.getBytes(Demo.UTF8));
+        if (operation == lastOp) {
+            return sessions.get(to);
+        }
+
+        SignalProtocolAddress toAddress = new SignalProtocolAddress(to, 1);
+        SessionBuilder builder = new SessionBuilder(store, toAddress);
+
+        try {
+            builder.process(toEntity.getPreKey());
+        } catch (InvalidKeyException | UntrustedIdentityException e) {
+            throw new RuntimeException(e);
+        }
+
+        SessionCipher cipher = new SessionCipher(store, toAddress);
+
+        sessions.put(to, cipher);
+        lastOp = operation;
+
+        return cipher;
+    }
+
+    public synchronized PreKeySignalMessage encrypt(String toAddress, String message) {
+        SessionCipher cipher = getCipher(Operation.ENCRYPT, toAddress);
+
+        CiphertextMessage ciphertext = cipher.encrypt(message.getBytes(UTF8));
         byte[] rawCiphertext = ciphertext.serialize();
 
-        System.out.printf("to=%s msg=%s%n", toAddress, byteArrayToString(rawCiphertext));
+//        System.out.printf("to=%s msg=%s%n", toAddress, byteArrayToString(rawCiphertext));
 
-        PreKeySignalMessage messageToToAddress = new PreKeySignalMessage(rawCiphertext);
+        PreKeySignalMessage messageToToAddress;
+        try {
+            messageToToAddress = new PreKeySignalMessage(rawCiphertext);
+        } catch (InvalidMessageException | InvalidVersionException e) {
+            throw new RuntimeException(e);
+        }
 
         return messageToToAddress;
     }
 
-    public String decrypt(String fromAddress, PreKeySignalMessage ciphertext)
-            throws DuplicateMessageException, LegacyMessageException, InvalidMessageException, InvalidKeyIdException, InvalidKeyException, UntrustedIdentityException
-    {
-        SessionCipher cipher = sessions.getOrDefault(fromAddress, null);
+    public synchronized String decrypt(String fromAddress, PreKeySignalMessage ciphertext) {
+        SessionCipher cipher = getCipher(Operation.DECRYPT, fromAddress);
 
-        if (cipher == null) {
-            throw new IllegalStateException("unknown sender");
+//        System.out.println(byteArrayToString(ciphertext.serialize()));
+
+        byte[] decrypt;
+        try {
+            decrypt = cipher.decrypt(ciphertext, new DecryptionCallback() {
+                @Override
+                public void handlePlaintext(byte[] plaintext) {
+//                System.out.printf("callback: %s%n", new String(plaintext, UTF8));
+                }
+            });
+        } catch (DuplicateMessageException | LegacyMessageException | InvalidMessageException | InvalidKeyIdException
+                | InvalidKeyException | UntrustedIdentityException e) {
+            throw new RuntimeException(e);
         }
 
-        System.out.println(byteArrayToString(ciphertext.serialize()));
-
-        byte[] decrypt = cipher.decrypt(ciphertext, new DecryptionCallback() {
-            @Override
-            public void handlePlaintext(byte[] plaintext) {
-                System.out.printf("callback: %s%n", new String(plaintext, Demo.UTF8));
-            }
-        });
-
-        return new String(decrypt, Demo.UTF8);
+        return new String(decrypt, UTF8);
     }
 
     private String byteArrayToString(byte[] rawCiphertext) {
