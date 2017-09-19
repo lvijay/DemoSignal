@@ -1,63 +1,73 @@
 package hacking.signal;
 
+import static java.util.stream.Collectors.joining;
+import static java.util.stream.Collectors.toList;
+
 import java.util.Arrays;
-import java.util.Iterator;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.Supplier;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import org.whispersystems.libsignal.protocol.PreKeySignalMessage;
 
 public class Demo {
-    public static void main(String[] args)
-            throws Exception
-    {
+    public static void main(String[] args) throws Exception {
+        /*
+         * Create instances of the two parties.
+         */
         Entity alice = new Entity(1, 314159, "alice");
-        Entity bob = new Entity(2, 27182, "bob");
+        Entity bob = new Entity(2, 271828, "bob");
 
-        Session aliceSession = new Session(alice.getStore());
-        Session bobSession = new Session(bob.getStore());
+        /*
+         * Establish a session between the two parties.
+         */
+        Session aliceToBobSession = new Session(alice.getStore(), bob.getPreKey(), bob.getAddress());
 
-        aliceSession.introduceTo(bob);
-        bobSession.introduceTo(alice);
+        /*
+         * alice can now send messages to bob.
+         */
+        List<PreKeySignalMessage> toBobMessages = Arrays.stream("31,41,59,26,53".split(","))
+                .map(msg -> aliceToBobSession.encrypt(msg))
+                .collect(Collectors.toList());
 
-        Sender bobToAlice = new Sender(
-                supplier("10,21,33,42,5d,6c".split(",")),
-                plaintext -> aliceSession.encrypt("bob", plaintext),
-                m -> System.out.printf("a->b: '%s'%n", bobSession.decrypt("alice", m)));
-        Sender aliceToBob = new Sender(
-                supplier("a,b,c,d,e,f,g,h,i,j,k".split(",")),
-                plaintext -> bobSession.encrypt("alice", plaintext),
-                m -> System.out.printf("b->a: '%s'%n", aliceSession.decrypt("bob", m)));
+        /*
+         * For bob to read them, bob must know alice.
+         */
+        Session bobToAliceSession = new Session(bob.getStore(), alice.getPreKey(), alice.getAddress());
 
-        bobToAlice.run();
-        System.out.println("--");
-        aliceToBob.run();
-    }
+        /*
+         * Now bob can decrypt them.
+         */
+        String fromAliceMessages = toBobMessages.stream()
+                .map(encryptedMsg -> bobToAliceSession.decrypt(encryptedMsg))
+                .collect(joining(","));
 
-    static Supplier<String> supplier(String[] strings) {
-        Iterator<String> iter = Arrays.asList(strings).iterator();
-        return () -> iter.hasNext() ? iter.next() : null;
-    }
-
-    static class Sender implements Runnable {
-        private final Supplier<String> messages;
-        private final Function<String, PreKeySignalMessage> encrypter;
-        private final Consumer<PreKeySignalMessage> sender;
-
-        public Sender(Supplier<String> messages, Function<String, PreKeySignalMessage> encrypter, Consumer<PreKeySignalMessage> sender) {
-            this.messages = messages;
-            this.encrypter = encrypter;
-            this.sender = sender;
+        if (!fromAliceMessages.equals("31,41,59,26,53")) {
+            throw new IllegalStateException("No match");
         }
 
-        @Override
-        public void run() {
-            String message;
-            while ((message = messages.get()) != null) {
-                sender.accept(encrypter.apply(message));
-                Thread.yield();
-            }
+        /*
+         * bob, too, can send messages to alice.
+         */
+        List<PreKeySignalMessage> toAliceMessages = Arrays.stream("the quick brown fox".split(" "))
+                .map(msg -> bobToAliceSession.encrypt(msg))
+                .collect(toList());
+
+        /*
+         * And alice can read bob's messages.
+         * Even if they arrive out of order.
+         */
+        Collections.shuffle(toAliceMessages);
+        List<String> fromBobMessages = toAliceMessages.stream()
+                .map(encryptedMsg -> aliceToBobSession.decrypt(encryptedMsg))
+                .collect(Collectors.toList());
+
+        if (!(fromBobMessages.size() == 4
+                && fromBobMessages.contains("the")
+                && fromBobMessages.contains("quick")
+                && fromBobMessages.contains("brown")
+                && fromBobMessages.contains("fox"))) {
+            throw new IllegalStateException("No match");
         }
     }
 }

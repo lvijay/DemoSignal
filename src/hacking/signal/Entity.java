@@ -15,9 +15,9 @@ import org.whispersystems.libsignal.state.impl.InMemorySignalProtocolStore;
 import org.whispersystems.libsignal.util.KeyHelper;
 
 public class Entity {
-    final SignalProtocolStore store;
-    final PreKeyBundle preKey;
-    final SignalProtocolAddress address;
+    private final SignalProtocolStore store;
+    private final PreKeyBundle preKey;
+    private final SignalProtocolAddress address;
 
     public Entity(int preKeyId, int signedPreKeyId, String address)
             throws InvalidKeyException
@@ -68,7 +68,7 @@ public class Entity {
         return preKey;
     }
 
-    public String getAddress() {
-        return address.getName();
+    public SignalProtocolAddress getAddress() {
+        return address;
     }
 }
