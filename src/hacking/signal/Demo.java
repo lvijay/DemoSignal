@@ -40,6 +40,7 @@ public class Demo {
          */
         String fromAliceMessages = toBobMessages.stream()
                 .map(encryptedMsg -> bobToAliceSession.decrypt(encryptedMsg))
+                .peek(msg -> System.out.printf("Received from alice: '%s'%n", msg))
                 .collect(joining(","));
 
         if (!fromAliceMessages.equals("31,41,59,26,53")) {
@@ -60,6 +61,7 @@ public class Demo {
         Collections.shuffle(toAliceMessages);
         List<String> fromBobMessages = toAliceMessages.stream()
                 .map(encryptedMsg -> aliceToBobSession.decrypt(encryptedMsg))
+                .peek(msg -> System.out.printf("Received from bob: '%s'%n", msg))
                 .collect(Collectors.toList());
 
         if (!(fromBobMessages.size() == 4
